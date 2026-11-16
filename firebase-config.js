@@ -1,16 +1,3 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {
-  getFirestore,
-  collection,
-  doc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  onSnapshot,
-  query,
-  orderBy
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
 // ==========================================
 // 1. PENGATURAN BENGKEL & KEAMANAN
 // ==========================================
@@ -22,14 +9,8 @@ export const APP_CONFIG = {
 };
 
 // ==========================================
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// 2. KONFIGURASI FIREBASE PROJECT KAMU
+// ==========================================
 const firebaseConfig = {
   apiKey: "AIzaSyDot4MgQNCb9aLIP6bHasUaesI1ta81chk",
   authDomain: "bengkel-motor-a2d8f.firebaseapp.com",
@@ -40,165 +21,128 @@ const firebaseConfig = {
   measurementId: "G-PFWTS6GX91"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-// ==========================================
-// 3. DATA SIMULASI AWAL (JIKA MODE LOCAL DEMO)
-// ==========================================
-const todayStr = new Date().toISOString().split("T")[0];
+const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
+let firestorePromise = null;
+function getFirestoreModule() {
+  if (!firestorePromise) {
+    firestorePromise = (async () => {
+      const { initializeApp } = await import(
+        "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"
+      );
+      const fs = await import(
+        "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"
+      );
+      const app = initializeApp(firebaseConfig);
+      const db = fs.getFirestore(app);
+      return { db, ...fs };
+    })();
+  }
+  return firestorePromise;
+}
+
+// ==========================================
+// 3. DATA AWAL MASTER SPAREPART & JASA
+// ==========================================
 const DEFAULT_PARTS = [
-  { id: "p1", name: "Oli MPX2 0.8L", type: "part", cost: 43000, price: 58000, stock: 24 },
-  { id: "p2", name: "Oli Gardan Matic", type: "part", cost: 12000, price: 20000, stock: 18 },
-  { id: "p3", name: "Kampas Rem Depan", type: "part", cost: 35000, price: 55000, stock: 4 },
-  { id: "p4", name: "V-Belt + Roller Set", type: "part", cost: 115000, price: 165000, stock: 6 },
-  { id: "p5", name: "Jasa Servis Ringan & Injeksi", type: "service", cost: 0, price: 45000, stock: 999 },
-  { id: "p6", name: "Jasa Servis CVT", type: "service", cost: 0, price: 35000, stock: 999 },
-  { id: "p7", name: "Jasa Ganti Oli & Rem", type: "service", cost: 0, price: 15000, stock: 999 }
+  { name: "Oli MPX2 0.8L", type: "part", cost: 43000, price: 58000, stock: 24 },
+  { name: "Oli Gardan Matic", type: "part", cost: 12000, price: 20000, stock: 18 },
+  { name: "Kampas Rem Depan", type: "part", cost: 35000, price: 55000, stock: 4 },
+  { name: "V-Belt + Roller Set", type: "part", cost: 115000, price: 165000, stock: 6 },
+  { name: "Jasa Servis Ringan & Injeksi", type: "service", cost: 0, price: 45000, stock: 999 },
+  { name: "Jasa Servis CVT", type: "service", cost: 0, price: 35000, stock: 999 },
+  { name: "Jasa Ganti Oli & Rem", type: "service", cost: 0, price: 15000, stock: 999 }
 ];
 
-const DEFAULT_SERVICES = [
-  {
-    id: "srv-demo-1",
-    code: "SRV-101",
-    date: todayStr,
-    plate: "B 4821 KTZ",
-    bike: "Honda Vario 150",
-    km: 24500,
-    customer: "Rizky Pratama",
-    phone: "6281234567890",
-    mechanic: "Kang Asep",
-    eta: "15:30",
-    complaint: "Tarikan awal gredeg, ganti oli mesin",
-    status: "Menunggu Konfirmasi",
-    stockDeducted: false,
-    items: [
-      { partId: "p1", name: "Oli MPX2 0.8L", type: "part", cost: 43000, price: 58000, qty: 1, approval: "approved" },
-      { partId: "p6", name: "Jasa Servis CVT", type: "service", cost: 0, price: 35000, qty: 1, approval: "approved" },
-      { partId: "p3", name: "Kampas Rem Depan", type: "part", cost: 35000, price: 55000, qty: 1, approval: "pending" }
-    ]
-  },
-  {
-    id: "srv-demo-2",
-    code: "SRV-102",
-    date: todayStr,
-    plate: "B 6190 VXY",
-    bike: "Yamaha NMAX",
-    km: 19200,
-    customer: "Dian Sastro",
-    phone: "6281298765432",
-    mechanic: "Mas Dimas",
-    eta: "16:15",
-    complaint: "Servis berkala & cek rem",
-    status: "Dikerjakan",
-    stockDeducted: false,
-    items: [
-      { partId: "p5", name: "Jasa Servis Ringan & Injeksi", type: "service", cost: 0, price: 45000, qty: 1, approval: "approved" }
-    ]
-  }
-];
-
-function getLocal(key, fallback) {
-  const raw = localStorage.getItem(key);
-  if (!raw) {
-    localStorage.setItem(key, JSON.stringify(fallback));
-    return fallback;
-  }
-  return JSON.parse(raw);
-}
-
-function setLocal(key, data) {
-  localStorage.setItem(key, JSON.stringify(data));
-  window.dispatchEvent(new Event("local-db-updated"));
-}
+let hasSeededParts = false;
 
 // ==========================================
-// 4. DATABASE SERVICE ADAPTER (FIRESTORE / LOCAL)
+// 4. DATABASE SERVICE (CLOUD FIRESTORE)
 // ==========================================
 export const dbService = {
   isCloud: isFirebaseConfigured,
 
   subscribeServices(callback) {
-    if (isFirebaseConfigured) {
-      const q = query(collection(db, "services"), orderBy("createdAt", "desc"));
-      return onSnapshot(q, (snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        callback(list);
-      });
-    } else {
-      const load = () => callback(getLocal("bengkel_services", DEFAULT_SERVICES));
-      load();
-      window.addEventListener("local-db-updated", load);
-      return () => window.removeEventListener("local-db-updated", load);
-    }
+    let unsub = () => {};
+    getFirestoreModule()
+      .then(({ db, collection, onSnapshot }) => {
+        unsub = onSnapshot(
+          collection(db, "services"),
+          (snap) => {
+            const list = snap.docs
+              .map((d) => ({ id: d.id, ...d.data() }))
+              .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            callback(list);
+          },
+          (err) => {
+            console.error("Firestore Services Error:", err);
+            alert("Gagal baca data Firestore. Pastikan Firestore Database sudah dibuat & Rules di-set allow read, write.");
+          }
+        );
+      })
+      .catch((err) => console.error("Firebase Init Error:", err));
+
+    return () => unsub();
   },
 
   async addService(data) {
-    if (isFirebaseConfigured) {
-      return await addDoc(collection(db, "services"), { ...data, createdAt: Date.now() });
-    }
-    const list = getLocal("bengkel_services", DEFAULT_SERVICES);
-    list.unshift({ id: "srv-" + Date.now(), ...data });
-    setLocal("bengkel_services", list);
+    const { db, collection, addDoc } = await getFirestoreModule();
+    return await addDoc(collection(db, "services"), {
+      ...data,
+      createdAt: Date.now()
+    });
   },
 
   async updateService(id, updates) {
-    if (isFirebaseConfigured) {
-      return await updateDoc(doc(db, "services", id), updates);
-    }
-    const list = getLocal("bengkel_services", DEFAULT_SERVICES).map((item) =>
-      item.id === id ? { ...item, ...updates } : item
-    );
-    setLocal("bengkel_services", list);
+    const { db, doc, updateDoc } = await getFirestoreModule();
+    return await updateDoc(doc(db, "services", id), updates);
   },
 
   async deleteService(id) {
-    if (isFirebaseConfigured) {
-      return await deleteDoc(doc(db, "services", id));
-    }
-    const list = getLocal("bengkel_services", DEFAULT_SERVICES).filter((item) => item.id !== id);
-    setLocal("bengkel_services", list);
+    const { db, doc, deleteDoc } = await getFirestoreModule();
+    return await deleteDoc(doc(db, "services", id));
   },
 
   subscribeParts(callback) {
-    if (isFirebaseConfigured) {
-      return onSnapshot(collection(db, "parts"), (snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        callback(list);
-      });
-    } else {
-      const load = () => callback(getLocal("bengkel_parts", DEFAULT_PARTS));
-      load();
-      window.addEventListener("local-db-updated", load);
-      return () => window.removeEventListener("local-db-updated", load);
-    }
+    let unsub = () => {};
+    getFirestoreModule()
+      .then(({ db, collection, addDoc, onSnapshot }) => {
+        unsub = onSnapshot(
+          collection(db, "parts"),
+          async (snap) => {
+            // Auto-isi data contoh jika collection 'parts' masih kosong melompong
+            if (snap.empty && !hasSeededParts) {
+              hasSeededParts = true;
+              for (const item of DEFAULT_PARTS) {
+                await addDoc(collection(db, "parts"), item);
+              }
+              return;
+            }
+            const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            callback(list);
+          },
+          (err) => {
+            console.error("Firestore Parts Error:", err);
+          }
+        );
+      })
+      .catch((err) => console.error("Firebase Init Error:", err));
+
+    return () => unsub();
   },
 
   async addPart(data) {
-    if (isFirebaseConfigured) {
-      return await addDoc(collection(db, "parts"), data);
-    }
-    const list = getLocal("bengkel_parts", DEFAULT_PARTS);
-    list.push({ id: "part-" + Date.now(), ...data });
-    setLocal("bengkel_parts", list);
+    const { db, collection, addDoc } = await getFirestoreModule();
+    return await addDoc(collection(db, "parts"), data);
   },
 
   async updatePart(id, updates) {
-    if (isFirebaseConfigured) {
-      return await updateDoc(doc(db, "parts", id), updates);
-    }
-    const list = getLocal("bengkel_parts", DEFAULT_PARTS).map((item) =>
-      item.id === id ? { ...item, ...updates } : item
-    );
-    setLocal("bengkel_parts", list);
+    const { db, doc, updateDoc } = await getFirestoreModule();
+    return await updateDoc(doc(db, "parts", id), updates);
   },
 
   async deletePart(id) {
-    if (isFirebaseConfigured) {
-      return await deleteDoc(doc(db, "parts", id));
-    }
-    const list = getLocal("bengkel_parts", DEFAULT_PARTS).filter((item) => item.id !== id);
-    setLocal("bengkel_parts", list);
+    const { db, doc, deleteDoc } = await getFirestoreModule();
+    return await deleteDoc(doc(db, "parts", id));
   }
 };

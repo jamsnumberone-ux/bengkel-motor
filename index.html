@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sistem Service Bengkel Motor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
+
+  <!-- Navbar -->
+  <header class="bg-slate-900 text-white sticky top-0 z-40 shadow-md">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5">
+        <div class="bg-amber-500 text-slate-900 p-2 rounded-lg font-bold">
+          <i class="fa-solid fa-wrench"></i>
+        </div>
+        <div>
+          <h1 id="nav-shop-name" class="font-bold text-base sm:text-lg leading-tight">Bengkel Motor Pro</h1>
+          <p id="storage-mode-badge" class="text-[11px] text-amber-400">Mode Demo (Local)</p>
+        </div>
+      </div>
+
+      <nav class="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl text-xs sm:text-sm">
+        <button onclick="switchRole('customer')" id="tab-customer" class="nav-btn active px-3 py-1.5 rounded-lg font-medium transition">
+          <i class="fa-solid fa-magnifying-glass mr-1"></i> Cek Motor
+        </button>
+        <button onclick="requestRoleAccess('admin')" id="tab-admin" class="nav-btn px-3 py-1.5 rounded-lg font-medium transition">
+          <i class="fa-solid fa-clipboard-list mr-1"></i> Admin
+        </button>
+        <button onclick="requestRoleAccess('owner')" id="tab-owner" class="nav-btn px-3 py-1.5 rounded-lg font-medium transition">
+          <i class="fa-solid fa-chart-line mr-1"></i> Owner
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="max-w-6xl w-full mx-auto px-4 py-6 flex-1">
+
+    <!-- ==================== 1. VIEW CUSTOMER ==================== -->
+    <section id="view-customer" class="space-y-6">
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-8 text-center max-w-2xl mx-auto">
+        <span class="inline-block bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1 rounded-full mb-2">
+          Live Status Tracking
+        </span>
+        <h2 class="text-xl sm:text-2xl font-bold text-slate-900">Cek Progres Servis Motor Anda</h2>
+        <p class="text-sm text-slate-500 mt-1">Masukkan Nomor Polisi (Plat Nomor) atau Kode Servis tanpa perlu login.</p>
+
+        <form id="form-track" class="mt-5 flex flex-col sm:flex-row gap-2">
+          <input type="text" id="input-track-query" placeholder="Contoh: B 1234 XYZ atau SRV-001"
+            class="flex-1 uppercase border border-slate-300 rounded-xl px-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500" required />
+          <button type="submit" class="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-6 py-3 rounded-xl text-sm transition">
+            Cek Status
+          </button>
+        </form>
+      </div>
+
+      <!-- Hasil Tracking Customer -->
+      <div id="customer-result" class="max-w-2xl mx-auto hidden"></div>
+    </section>
+
+    <!-- ==================== 2. VIEW ADMIN / KASIR ==================== -->
+    <section id="view-admin" class="hidden space-y-6">
+      <!-- Ringkasan Hari Ini -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <p class="text-xs text-slate-500 font-medium">Motor Masuk Hari Ini</p>
+          <p id="stat-admin-total" class="text-2xl font-bold text-slate-900 mt-1">0</p>
+        </div>
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <p class="text-xs text-amber-600 font-medium">Antre / Dicek / Konfirmasi</p>
+          <p id="stat-admin-queue" class="text-2xl font-bold text-amber-600 mt-1">0</p>
+        </div>
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <p class="text-xs text-blue-600 font-medium">Sedang Dikerjakan</p>
+          <p id="stat-admin-progress" class="text-2xl font-bold text-blue-600 mt-1">0</p>
+        </div>
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <p class="text-xs text-emerald-600 font-medium">Selesai Hari Ini</p>
+          <p id="stat-admin-done" class="text-2xl font-bold text-emerald-600 mt-1">0</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Form Input Motor Masuk -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm h-fit">
+          <h3 class="font-bold text-base text-slate-900 mb-4 flex items-center gap-2">
+            <i class="fa-solid fa-motorcycle text-amber-500"></i> Pendaftaran Servis Baru
+          </h3>
+          <form id="form-new-service" class="space-y-3 text-sm">
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Plat Nomor *</label>
+              <input type="text" id="srv-plate" placeholder="B 4567 KLM" required
+                class="w-full uppercase border border-slate-300 rounded-xl px-3 py-2 font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none" />
+              <p id="plate-history-hint" class="text-[11px] text-blue-600 mt-1 hidden"></p>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Tipe Motor *</label>
+                <input type="text" id="srv-bike" placeholder="Vario 160" required
+                  class="w-full border border-slate-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">KM Saat Ini</label>
+                <input type="number" id="srv-km" placeholder="18500"
+                  class="w-full border border-slate-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Nama Customer *</label>
+                <input type="text" id="srv-customer" placeholder="Budi" required
+                  class="w-full border border-slate-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">No. WhatsApp *</label>
+                <input type="tel" id="srv-phone" placeholder="08123456789" required
+                  class="w-full border border-slate-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Mekanik *</label>
+                <select id="srv-mechanic" class="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                  <option value="Kang Asep">Kang Asep</option>
+                  <option value="MasDimas">Mas Dimas</option>
+                  <option value="Bang Rendi">Bang Rendi</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Estimasi Selesai</label>
+                <input type="time" id="srv-eta" value="16:00"
+                  class="w-full border border-slate-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Keluhan / Permintaan Awal *</label>
+              <textarea id="srv-complaint" rows="2" placeholder="Ganti oli, servis CVT, rem depan bunyi..." required
+                class="w-full border border-slate-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none"></textarea>
+            </div>
+            <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-2.5 rounded-xl transition">
+              + Masukkan ke Antrean
+            </button>
+          </form>
+        </div>
+
+        <!-- Daftar Antrean & Pekerjaan Hari Ini -->
+        <div class="lg:col-span-2 space-y-4">
+          <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-bold text-base text-slate-900">Antrean & Servis Aktif</h3>
+            <div class="flex flex-wrap gap-1.5 text-xs">
+              <button onclick="setAdminFilter('all')" class="filter-chip active px-3 py-1 rounded-full bg-slate-900 text-white">Semua</button>
+              <button onclick="setAdminFilter('active')" class="filter-chip px-3 py-1 rounded-full bg-slate-100 text-slate-700">Belum Selesai</button>
+              <button onclick="setAdminFilter('Selesai')" class="filter-chip px-3 py-1 rounded-full bg-slate-100 text-slate-700">Selesai</button>
+            </div>
+          </div>
+
+          <div id="admin-service-list" class="space-y-4"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 3. VIEW OWNER ==================== -->
+    <section id="view-owner" class="hidden space-y-6">
+      <!-- KPI Keuangan Hari Ini -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <p class="text-xs text-slate-500 font-medium">Omzet Hari Ini (Selesai)</p>
+          <p id="owner-revenue-today" class="text-xl sm:text-2xl font-bold text-slate-900 mt-1">Rp 0</p>
+        </div>
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <p class="text-xs text-slate-500 font-medium">Modal Sparepart Terpakai</p>
+          <p id="owner-cost-today" class="text-xl sm:text-2xl font-bold text-rose-600 mt-1">Rp 0</p>
+        </div>
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <p class="text-xs text-slate-500 font-medium">Komisi Mekanik (40% Jasa)</p>
+          <p id="owner-commission-today" class="text-xl sm:text-2xl font-bold text-amber-600 mt-1">Rp 0</p>
+        </div>
+        <div class="bg-emerald-900 text-white p-4 rounded-2xl shadow-sm">
+          <p class="text-xs text-emerald-200 font-medium">Profit Bersih Hari Ini</p>
+          <p id="owner-profit-today" class="text-xl sm:text-2xl font-bold text-emerald-400 mt-1">Rp 0</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Performa & Komisi Mekanik -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm h-fit">
+          <h3 class="font-bold text-base text-slate-900 mb-3">
+            <i class="fa-solid fa-user-gear text-amber-500 mr-1.5"></i> Beban & Komisi Mekanik Hari Ini
+          </h3>
+          <div id="owner-mechanic-list" class="space-y-3 text-sm"></div>
+        </div>
+
+        <!-- Master Data Sparepart & Jasa (Stok & Harga Modal/Jual) -->
+        <div class="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="font-bold text-base text-slate-900">Master Sparepart & Tarif Jasa</h3>
+              <p class="text-xs text-slate-500">Stok otomatis berkurang saat servis ditandai Selesai.</p>
+            </div>
+            <button onclick="openPartModal()" class="bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold px-3.5 py-2 rounded-xl">
+              + Tambah Item Baru
+            </button>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs sm:text-sm border-collapse">
+              <thead>
+                <tr class="border-b border-slate-200 text-slate-500">
+                  <th class="py-2.5 px-2">Nama Item</th>
+                  <th class="py-2.5 px-2">Tipe</th>
+                  <th class="py-2.5 px-2">Modal</th>
+                  <th class="py-2.5 px-2">Harga Jual</th>
+                  <th class="py-2.5 px-2">Stok</th>
+                  <th class="py-2.5 px-2 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="owner-parts-table" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==================== MODAL: TAMBAH SPARE PART / JASA KE MOTOR ==================== -->
+  <div id="modal-add-item" class="fixed inset-0 bg-slate-900/60 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-xl space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h3 class="font-bold text-base">Tambah Kebutuhan / Sparepart Motor</h3>
+        <button onclick="closeModal('modal-add-item')" class="text-slate-400 hover:text-slate-700">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <form id="form-add-service-item" class="space-y-3 text-sm">
+        <input type="hidden" id="modal-service-id" />
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Pilih dari Master Sparepart / Jasa</label>
+          <select id="select-master-part" class="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white"></select>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Jumlah (Qty)</label>
+            <input type="number" id="input-item-qty" value="1" min="1" required
+              class="w-full border border-slate-300 rounded-xl px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Status Persetujuan</label>
+            <select id="input-item-approval" class="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white">
+              <option value="approved">Sudah Disetujui Awal</option>
+              <option value="pending">Tambahan (Perlu Konfirmasi)</option>
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-2.5 rounded-xl">
+          Tambahkan ke Nota Motor
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: TAMBAH MASTER PART (OWNER) ==================== -->
+  <div id="modal-part" class="fixed inset-0 bg-slate-900/60 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-xl space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h3 class="font-bold text-base">Tambah Master Sparepart / Jasa</h3>
+        <button onclick="closeModal('modal-part')" class="text-slate-400 hover:text-slate-700">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <form id="form-new-part" class="space-y-3 text-sm">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Nama Sparepart / Jasa *</label>
+          <input type="text" id="part-name" placeholder="Oli MPX2 0.8L / Jasa Servis CVT" required
+            class="w-full border border-slate-300 rounded-xl px-3 py-2" />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Kategori</label>
+            <select id="part-type" class="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white">
+              <option value="part">Sparepart (Potong Stok)</option>
+              <option value="service">Jasa Mekanik (Komisi)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Stok Awal</label>
+            <input type="number" id="part-stock" value="10" min="0"
+              class="w-full border border-slate-300 rounded-xl px-3 py-2" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Harga Modal (Rp)</label>
+            <input type="number" id="part-cost" value="45000" min="0" required
+              class="w-full border border-slate-300 rounded-xl px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Harga Jual (Rp)</label>
+            <input type="number" id="part-price" value="60000" min="0" required
+              class="w-full border border-slate-300 rounded-xl px-3 py-2" />
+          </div>
+        </div>
+        <button type="submit" class="w-full bg-slate-900 text-white font-bold py-2.5 rounded-xl">
+          Simpan ke Master Data
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: PIN AKSES ADMIN / OWNER ==================== -->
+  <div id="modal-pin" class="fixed inset-0 bg-slate-900/60 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl max-w-xs w-full p-5 shadow-xl space-y-4 text-center">
+      <h3 id="pin-modal-title" class="font-bold text-base">Masukkan PIN Akses</h3>
+      <p id="pin-modal-hint" class="text-xs text-slate-500">Default PIN Admin: 1234 | Owner: 9999</p>
+      <form id="form-pin" class="space-y-3">
+        <input type="password" id="input-pin" maxlength="6" placeholder="••••" required
+          class="w-full text-center tracking-widest text-xl font-bold border border-slate-300 rounded-xl px-3 py-2.5" />
+        <div class="flex gap-2">
+          <button type="button" onclick="closeModal('modal-pin')" class="flex-1 bg-slate-100 py-2 rounded-xl text-sm font-semibold">Batal</button>
+          <button type="submit" class="flex-1 bg-amber-500 text-slate-900 py-2 rounded-xl text-sm font-bold">Masuk</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

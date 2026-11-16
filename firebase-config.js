@@ -151,7 +151,7 @@ export const dbService = {
     return await deleteDoc(doc(db, "mechanics", id));
   },
 
-  // --- EXPENSES (KAS KELUAR) ---
+  // --- EXPENSES ---
   subscribeExpenses(callback) {
     let unsub = () => {};
     getFirestoreModule().then(({ db, collection, onSnapshot }) => {
@@ -173,7 +173,7 @@ export const dbService = {
     return await deleteDoc(doc(db, "expenses", id));
   },
 
-  // --- DIRECT SALES (BELI PUTUS) ---
+  // --- DIRECT SALES ---
   subscribeDirectSales(callback) {
     let unsub = () => {};
     getFirestoreModule().then(({ db, collection, onSnapshot }) => {
@@ -193,5 +193,42 @@ export const dbService = {
   async deleteDirectSale(id) {
     const { db, doc, deleteDoc } = await getFirestoreModule();
     return await deleteDoc(doc(db, "direct_sales", id));
+  },
+
+  // --- CASH DRAWER CLOSINGS (TUTUP KASIR) ---
+  subscribeClosings(callback) {
+    let unsub = () => {};
+    getFirestoreModule().then(({ db, collection, onSnapshot }) => {
+      unsub = onSnapshot(collection(db, "closings"), (snap) => {
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        callback(list);
+      });
+    });
+    return () => unsub();
+  },
+  async addClosing(data) {
+    const { db, collection, addDoc } = await getFirestoreModule();
+    return await addDoc(collection(db, "closings"), { ...data, createdAt: Date.now() });
+  },
+  async deleteClosing(id) {
+    const { db, doc, deleteDoc } = await getFirestoreModule();
+    return await deleteDoc(doc(db, "closings", id));
+  },
+
+  // --- SHOP SETTINGS (QRIS & REKENING) ---
+  subscribeSettings(callback) {
+    let unsub = () => {};
+    getFirestoreModule().then(({ db, doc, onSnapshot }) => {
+      unsub = onSnapshot(doc(db, "settings", "general"), (snap) => {
+        callback(snap.exists() ? snap.data() : { bankInfo: "", qrisImage: "" });
+      });
+    });
+    return () => unsub();
+  },
+  async saveSettings(data) {
+    const { db, doc, setDoc } = await getFirestoreModule();
+    return await setDoc(doc(db, "settings", "general"), data, { merge: true });
   }
 };

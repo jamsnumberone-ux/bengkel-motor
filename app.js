@@ -6,16 +6,19 @@ let parts = [];
 let mechanics = [];
 let expenses = [];
 let directSales = [];
+let closings = [];
+let shopSettings = { bankInfo: "", qrisImage: "" };
 let posCart = [];
 
 let pendingRole = null;
 let adminFilter = "all";
 let ownerPeriod = "today";
 let activeTrackQuery = "";
+let currentExpectedCash = 0;
 
 const STATUS_FLOW = ["Antre", "Dicek", "Menunggu Konfirmasi", "Dikerjakan", "Selesai"];
 const todayStr = new Date().toISOString().split("T")[0];
-const monthPrefix = todayStr.slice(0, 7); // YYYY-MM
+const monthPrefix = todayStr.slice(0, 7);
 
 const formatRp = (num) => "Rp " + Number(num || 0).toLocaleString("id-ID");
 
@@ -39,6 +42,34 @@ function isDateInOwnerPeriod(dateStr) {
   return true;
 }
 
+// Kompres Gambar Otomatis via Canvas agar ringan disimpan di Firestore
+function compressImageToBase64(file, maxWidth = 480, quality = 0.65) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let w = img.width;
+        let h = img.height;
+        if (w > maxWidth) {
+          h = Math.round((h * maxWidth) / w);
+          w = maxWidth;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 // ==========================================
 // INISIALISASI APLIKASI
 // ==========================================
@@ -54,7 +85,6 @@ document.addEventListener("DOMContentLoaded", () => {
     badge.className = "text-[11px] text-emerald-400";
   }
 
-  // Subscribe Real-time Collections
   dbService.subscribeParts((data) => {
     parts = data;
     renderPartDropdowns();
@@ -87,7 +117,17 @@ document.addEventListener("DOMContentLoaded", () => {
     renderOwnerFinanceAndMetrics();
   });
 
-  // Cek parameter link tracking (?track=SRV-101)
+  dbService.subscribeClosings((data) => {
+    closings = data;
+    renderOwnerClosingsList();
+  });
+
+  dbService.subscribeSettings((data) => {
+    shopSettings = data || { bankInfo: "", qrisImage: "" };
+    renderSettingsPreview();
+    if (activeTrackQuery) renderCustomerTracking(activeTrackQuery);
+  });
+
   const trackParam = new URLSearchParams(window.location.search).get("track");
   if (trackParam) {
     document.getElementById("input-track-query").value = trackParam;
@@ -99,7 +139,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ==========================================
-// NAVIGASI ROLE & SUB-TAB
+// NAVIGASI ROLE & MODAL
 // ==========================================
 window.switchRole = function (role) {
   ["customer", "admin", "owner"].forEach((r) => {
@@ -133,7 +173,7 @@ window.switchAdminSubTab = function (sub, btnEl) {
 };
 
 window.switchOwnerSubTab = function (sub, btnEl) {
-  ["finance", "catalog", "mechanics"].forEach((s) => {
+  ["finance", "catalog", "mechanics", "settings"].forEach((s) => {
     document.getElementById(`owner-sub-${s}`).classList.toggle("hidden", s !== sub);
   });
   document.querySelectorAll(".owner-subtab").forEach((b) => {
@@ -156,11 +196,16 @@ window.closeModal = (id) => {
   el.classList.remove("flex");
 };
 
+window.zoomPhoto = (src) => {
+  if (!src) return;
+  document.getElementById("zoom-image-target").src = src;
+  openModal("modal-image-preview");
+};
+
 // ==========================================
-// EVENT LISTENERS SEMUA FORM
+// EVENT LISTENERS FORM
 // ==========================================
 function setupEventListeners() {
-  // PIN Login
   document.getElementById("form-pin").addEventListener("submit", (e) => {
     e.preventDefault();
     const pin = document.getElementById("input-pin").value;
@@ -174,11 +219,23 @@ function setupEventListeners() {
     }
   });
 
-  // Tracking Customer
   document.getElementById("form-track").addEventListener("submit", (e) => {
     e.preventDefault();
     activeTrackQuery = document.getElementById("input-track-query").value.trim().toUpperCase();
     renderCustomerTracking(activeTrackQuery);
+  });
+
+  // Preview foto saat dipilih di modal tambah item
+  document.getElementById("input-item-photo").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    const prevImg = document.getElementById("preview-item-photo");
+    if (!file) {
+      prevImg.classList.add("hidden");
+      return;
+    }
+    const base64 = await compressImageToBase64(file, 450, 0.65);
+    prevImg.src = base64;
+    prevImg.classList.remove("hidden");
   });
 
   // Auto-isi Riwayat Plat Nomor
@@ -233,54 +290,73 @@ function setupEventListeners() {
     document.getElementById("plate-history-hint").classList.add("hidden");
   });
 
-  // Tambah Part/Jasa ke Motor (Katalog maupun Manual Belanja Luar)
+  // Tambah Part/Jasa + Foto Bukti ke Motor
   document.getElementById("form-add-service-item").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const srvId = document.getElementById("modal-service-id").value;
-    const mode = document.getElementById("add-item-mode").value;
-    const qty = Number(document.getElementById("input-item-qty").value) || 1;
-    const approval = document.getElementById("input-item-approval").value;
+    const btn = document.getElementById("btn-submit-item");
+    btn.disabled = true;
+    btn.textContent = "Menyimpan...";
 
-    const srv = services.find((s) => s.id === srvId);
-    if (!srv) return;
+    try {
+      const srvId = document.getElementById("modal-service-id").value;
+      const mode = document.getElementById("add-item-mode").value;
+      const qty = Number(document.getElementById("input-item-qty").value) || 1;
+      const approval = document.getElementById("input-item-approval").value;
+      const photoFile = document.getElementById("input-item-photo").files[0];
 
-    let newItem = null;
-    if (mode === "catalog") {
-      const partId = document.getElementById("select-master-part").value;
-      const part = parts.find((p) => p.id === partId);
-      if (!part) return;
-      newItem = {
-        uid: "itm-" + Date.now(),
-        partId: part.id,
-        name: part.name,
-        type: part.type,
-        cost: part.cost,
-        price: part.price,
-        qty,
-        approval
-      };
-    } else {
-      const manualName = document.getElementById("manual-item-name").value.trim();
-      if (!manualName) return alert("Isi nama barang/jasa terlebih dahulu.");
-      newItem = {
-        uid: "itm-" + Date.now(),
-        partId: "manual",
-        name: manualName + " [Luar]",
-        type: document.getElementById("manual-item-type").value,
-        cost: Number(document.getElementById("manual-item-cost").value) || 0,
-        price: Number(document.getElementById("manual-item-price").value) || 0,
-        qty,
-        approval
-      };
+      const srv = services.find((s) => s.id === srvId);
+      if (!srv) return;
+
+      let photoBase64 = "";
+      if (photoFile) {
+        photoBase64 = await compressImageToBase64(photoFile, 450, 0.65);
+      }
+
+      let newItem = null;
+      if (mode === "catalog") {
+        const partId = document.getElementById("select-master-part").value;
+        const part = parts.find((p) => p.id === partId);
+        if (!part) return;
+        newItem = {
+          uid: "itm-" + Date.now(),
+          partId: part.id,
+          name: part.name,
+          type: part.type,
+          cost: part.cost,
+          price: part.price,
+          qty,
+          approval,
+          photoBase64
+        };
+      } else {
+        const manualName = document.getElementById("manual-item-name").value.trim();
+        if (!manualName) return alert("Isi nama barang/jasa terlebih dahulu.");
+        newItem = {
+          uid: "itm-" + Date.now(),
+          partId: "manual",
+          name: manualName + " [Luar]",
+          type: document.getElementById("manual-item-type").value,
+          cost: Number(document.getElementById("manual-item-cost").value) || 0,
+          price: Number(document.getElementById("manual-item-price").value) || 0,
+          qty,
+          approval,
+          photoBase64
+        };
+      }
+
+      const updatedItems = [...(srv.items || []), newItem];
+      const updates = { items: updatedItems };
+      if (approval === "pending") updates.status = "Menunggu Konfirmasi";
+
+      await dbService.updateService(srvId, updates);
+      document.getElementById("manual-item-name").value = "";
+      document.getElementById("input-item-photo").value = "";
+      document.getElementById("preview-item-photo").classList.add("hidden");
+      closeModal("modal-add-item");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Tambahkan ke Nota Motor";
     }
-
-    const updatedItems = [...(srv.items || []), newItem];
-    const updates = { items: updatedItems };
-    if (approval === "pending") updates.status = "Menunggu Konfirmasi";
-
-    await dbService.updateService(srvId, updates);
-    document.getElementById("manual-item-name").value = "";
-    closeModal("modal-add-item");
   });
 
   // Pelunasan Kasir Servis
@@ -303,7 +379,27 @@ function setupEventListeners() {
     closeModal("modal-payment");
   });
 
-  // Checkout Beli Putus Sparepart
+  // Simpan Berita Acara Tutup Kasir
+  document.getElementById("form-closing-drawer").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const dateVal = document.getElementById("closing-date").value || todayStr;
+    const actualCash = Number(document.getElementById("close-actual-cash").value) || 0;
+    const diff = actualCash - currentExpectedCash;
+
+    await dbService.addClosing({
+      date: dateVal,
+      expectedCash: currentExpectedCash,
+      actualCash,
+      diff,
+      note: document.getElementById("close-note").value.trim() || "-"
+    });
+
+    alert("Berita acara tutup kasir berhasil disimpan!");
+    e.target.reset();
+    closeModal("modal-closing");
+  });
+
+  // Checkout Beli Putus
   document.getElementById("form-pos-checkout").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (posCart.length === 0) return alert("Keranjang belanja masih kosong!");
@@ -311,7 +407,6 @@ function setupEventListeners() {
     const totalRevenue = posCart.reduce((s, i) => s + i.price * i.qty, 0);
     const totalCost = posCart.reduce((s, i) => s + i.cost * i.qty, 0);
 
-    // Potong Stok Master Part
     for (const item of posCart) {
       const master = parts.find((p) => p.id === item.partId);
       if (master && master.type === "part") {
@@ -374,11 +469,25 @@ function setupEventListeners() {
     document.getElementById("exp-title").value = "";
     document.getElementById("exp-amount").value = "";
   });
+
+  // Simpan Pengaturan QRIS & Rekening (Owner)
+  document.getElementById("form-shop-settings").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const bankInfo = document.getElementById("set-bank-info").value.trim();
+    const qrisFile = document.getElementById("set-qris-file").files[0];
+
+    let qrisImage = shopSettings.qrisImage || "";
+    if (qrisFile) {
+      // Gunakan kualitas 0.85 & lebar 520px agar kode QR tetap tajam saat di-scan
+      qrisImage = await compressImageToBase64(qrisFile, 520, 0.85);
+    }
+
+    await dbService.saveSettings({ bankInfo, qrisImage });
+    document.getElementById("set-qris-file").value = "";
+    alert("Pengaturan QRIS & Rekening berhasil disimpan!");
+  });
 }
 
-// ==========================================
-// HELPER POTONG STOK OTOMATIS
-// ==========================================
 async function deductStockIfNeeded(srv) {
   if (srv.stockDeducted) return;
   const approvedParts = (srv.items || []).filter(
@@ -394,7 +503,7 @@ async function deductStockIfNeeded(srv) {
 }
 
 // ==========================================
-// 1. RENDER TRACKING CUSTOMER
+// 1. RENDER TRACKING CUSTOMER (DENGAN FOTO BUKTI & QRIS)
 // ==========================================
 function renderCustomerTracking(queryStr) {
   const container = document.getElementById("customer-result");
@@ -420,6 +529,11 @@ function renderCustomerTracking(queryStr) {
   const activeItems = (match.items || []).filter((i) => i.approval !== "rejected");
   const totalBiaya = activeItems.reduce((sum, i) => sum + i.price * i.qty, 0);
   const pendingItems = (match.items || []).filter((i) => i.approval === "pending");
+
+  const showPaymentInfo =
+    match.paymentStatus !== "paid" &&
+    totalBiaya > 0 &&
+    (shopSettings.bankInfo || shopSettings.qrisImage);
 
   container.innerHTML = `
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -457,28 +571,39 @@ function renderCustomerTracking(queryStr) {
         </div>
       </div>
 
-      <!-- Konfirmasi Part Tambahan -->
+      <!-- Konfirmasi Part Tambahan + Foto Bukti -->
       ${
         pendingItems.length > 0
           ? `<div class="bg-amber-50 border-b border-amber-200 p-4 space-y-3">
               <p class="font-bold text-xs sm:text-sm text-amber-900">
                 <i class="fa-solid fa-triangle-exclamation text-amber-600 mr-1"></i> Konfirmasi Penggantian Sparepart Tambahan:
               </p>
-              <div class="space-y-2">
+              <div class="space-y-2.5">
                 ${pendingItems
                   .map(
-                    (item, idx) => `
-                  <div class="bg-white p-3 rounded-xl border border-amber-200 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p class="font-bold text-sm text-slate-900">${item.name} (${item.qty}x)</p>
-                      <p class="text-xs text-slate-600">${formatRp(item.price * item.qty)}</p>
+                    (item) => `
+                  <div class="bg-white p-3 rounded-xl border border-amber-200 space-y-2.5">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p class="font-bold text-sm text-slate-900">${item.name} (${item.qty}x)</p>
+                        <p class="text-xs font-semibold text-amber-700">${formatRp(item.price * item.qty)}</p>
+                      </div>
+                      <div class="flex gap-2">
+                        <button onclick="customerRespondItem('${match.id}', '${item.uid || item.partId}', 'rejected')"
+                          class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-100 text-rose-700">Tolak</button>
+                        <button onclick="customerRespondItem('${match.id}', '${item.uid || item.partId}', 'approved')"
+                          class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white">Setuju Ganti</button>
+                      </div>
                     </div>
-                    <div class="flex gap-2">
-                      <button onclick="customerRespondItem('${match.id}', '${item.uid || item.partId}', 'rejected')"
-                        class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-100 text-rose-700">Tolak</button>
-                      <button onclick="customerRespondItem('${match.id}', '${item.uid || item.partId}', 'approved')"
-                        class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white">Setuju Ganti</button>
-                    </div>
+                    ${
+                      item.photoBase64
+                        ? `<div class="pt-1">
+                            <p class="text-[11px] text-slate-500 mb-1">Foto kondisi part lama (ketuk untuk perbesar):</p>
+                            <img src="${item.photoBase64}" onclick="zoomPhoto('${item.photoBase64}')"
+                              class="h-28 w-auto rounded-lg border border-slate-200 cursor-pointer object-cover" />
+                          </div>`
+                        : ""
+                    }
                   </div>`
                   )
                   .join("")}
@@ -497,13 +622,22 @@ function renderCustomerTracking(queryStr) {
                 ${activeItems
                   .map(
                     (i) => `
-                  <li class="py-2 flex justify-between items-center">
-                    <div>
-                      <span class="font-medium text-slate-800">${i.name}</span>
-                      <span class="text-xs text-slate-500 ml-1">(${i.qty}x)</span>
-                      ${i.approval === "pending" ? '<span class="ml-1 text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-semibold">Menunggu ACC</span>' : ""}
+                  <li class="py-2.5 flex justify-between items-center gap-2">
+                    <div class="flex items-center gap-2.5">
+                      ${
+                        i.photoBase64
+                          ? `<img src="${i.photoBase64}" onclick="zoomPhoto('${i.photoBase64}')"
+                              title="Lihat Foto Bukti"
+                              class="w-10 h-10 rounded-lg object-cover border border-slate-200 cursor-pointer shrink-0" />`
+                          : ""
+                      }
+                      <div>
+                        <span class="font-medium text-slate-800">${i.name}</span>
+                        <span class="text-xs text-slate-500 ml-1">(${i.qty}x)</span>
+                        ${i.approval === "pending" ? '<span class="ml-1 text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-semibold">Menunggu ACC</span>' : ""}
+                      </div>
                     </div>
-                    <span class="font-semibold text-slate-900">${formatRp(i.price * i.qty)}</span>
+                    <span class="font-semibold text-slate-900 shrink-0">${formatRp(i.price * i.qty)}</span>
                   </li>`
                   )
                   .join("")}
@@ -513,6 +647,7 @@ function renderCustomerTracking(queryStr) {
           <span class="font-bold text-slate-700">Total Biaya</span>
           <span class="text-lg font-extrabold text-slate-900">${formatRp(totalBiaya)}</span>
         </div>
+
         ${
           match.nextKm
             ? `<div class="bg-blue-50 text-blue-800 text-xs p-3 rounded-xl font-medium">
@@ -520,9 +655,41 @@ function renderCustomerTracking(queryStr) {
               </div>`
             : ""
         }
+
+        <!-- Info Pembayaran QRIS / Transfer Bengkel -->
+        ${
+          showPaymentInfo
+            ? `<div class="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-2.5">
+                <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Pembayaran Non-Tunai / Transfer</p>
+                ${
+                  shopSettings.bankInfo
+                    ? `<div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-center justify-between gap-2 text-left">
+                        <span class="text-xs sm:text-sm font-bold text-slate-800">${shopSettings.bankInfo}</span>
+                        <button type="button" onclick="copyText('${shopSettings.bankInfo}')"
+                          class="text-xs bg-slate-900 text-white px-2.5 py-1 rounded-lg font-semibold shrink-0">Salin</button>
+                      </div>`
+                    : ""
+                }
+                ${
+                  shopSettings.qrisImage
+                    ? `<div>
+                        <img src="${shopSettings.qrisImage}" onclick="zoomPhoto('${shopSettings.qrisImage}')"
+                          alt="QRIS Bengkel" class="max-h-56 mx-auto rounded-xl border border-slate-200 shadow-sm cursor-pointer" />
+                        <p class="text-[11px] text-slate-400 mt-1">Scan QRIS di atas atau ketuk gambar untuk memperbesar</p>
+                      </div>`
+                    : ""
+                }
+              </div>`
+            : ""
+        }
       </div>
     </div>`;
 }
+
+window.copyText = (txt) => {
+  navigator.clipboard?.writeText(txt);
+  alert("Info rekening disalin: " + txt);
+};
 
 window.customerRespondItem = async function (serviceId, itemKey, decision) {
   const srv = services.find((s) => s.id === serviceId);
@@ -540,7 +707,7 @@ window.customerRespondItem = async function (serviceId, itemKey, decision) {
 };
 
 // ==========================================
-// 2. RENDER PANEL ADMIN (ANTREAN, POS, RIWAYAT)
+// 2. RENDER PANEL ADMIN
 // ==========================================
 function renderMechanicSelects() {
   const sel = document.getElementById("srv-mechanic");
@@ -662,15 +829,22 @@ function renderAdminDashboard() {
                     .map(
                       (item, idx) => `
                     <div class="flex justify-between items-center text-xs bg-slate-50 px-3 py-1.5 rounded-lg">
-                      <div>
+                      <div class="flex items-center gap-2">
                         <span class="font-medium ${item.approval === "rejected" ? "line-through text-slate-400" : "text-slate-800"}">
                           ${item.name} (${item.qty}x)
                         </span>
                         ${
+                          item.photoBase64
+                            ? `<button type="button" onclick="zoomPhoto('${item.photoBase64}')" class="text-blue-600 hover:underline font-semibold">
+                                <i class="fa-solid fa-image"></i> Foto
+                              </button>`
+                            : ""
+                        }
+                        ${
                           item.approval === "pending"
-                            ? '<span class="ml-1 bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">Menunggu ACC</span>'
+                            ? '<span class="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">Menunggu ACC</span>'
                             : item.approval === "rejected"
-                            ? '<span class="ml-1 bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded text-[10px]">Ditolak</span>'
+                            ? '<span class="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded text-[10px]">Ditolak</span>'
                             : ""
                         }
                       </div>
@@ -744,6 +918,8 @@ window.switchAddItemMode = function (mode) {
 window.openAddItemModal = function (serviceId) {
   document.getElementById("modal-service-id").value = serviceId;
   document.getElementById("input-item-qty").value = 1;
+  document.getElementById("input-item-photo").value = "";
+  document.getElementById("preview-item-photo").classList.add("hidden");
   switchAddItemMode("catalog");
   openModal("modal-add-item");
 };
@@ -772,7 +948,6 @@ window.deleteServiceOrder = async function (serviceId) {
   if (confirm("Hapus data servis ini?")) await dbService.deleteService(serviceId);
 };
 
-// Kirim WhatsApp (Tracking atau Struk Lunas)
 window.sendWhatsAppUpdate = function (serviceId) {
   const srv = services.find((s) => s.id === serviceId);
   if (!srv) return;
@@ -798,7 +973,7 @@ window.sendWhatsAppUpdate = function (serviceId) {
     msg = `Halo Kak *${srv.customer}*, info servis motor *${srv.bike} (${srv.plate})* di *${APP_CONFIG.shopName}*:\n\n`;
     msg += `• Kode Servis: *${srv.code}*\n• Status: *${srv.status}*\n• Estimasi Biaya: *${formatRp(total)}*\n\n`;
     if (srv.status === "Menunggu Konfirmasi") {
-      msg += `⚠️ *Ada sparepart tambahan yang perlu persetujuan Kakak.*\n`;
+      msg += `⚠️ *Ada sparepart tambahan (beserta foto bukti) yang perlu persetujuan Kakak.*\n`;
     }
     msg += `Cek progres & rincian part secara live di:\n${trackUrl}`;
   }
@@ -807,7 +982,113 @@ window.sendWhatsAppUpdate = function (serviceId) {
 };
 
 // ==========================================
-// KASIR BELI PUTUS (POS SPAREPART LANGSUNG)
+// REKAP TUTUP KASIR (CASH DRAWER)
+// ==========================================
+window.openClosingModal = function () {
+  document.getElementById("closing-date").value = todayStr;
+  document.getElementById("close-actual-cash").value = "";
+  document.getElementById("close-note").value = "";
+  calculateClosingDrawer();
+  openModal("modal-closing");
+};
+
+window.calculateClosingDrawer = function () {
+  const targetDate = document.getElementById("closing-date").value || todayStr;
+
+  let cashSrv = 0;
+  let nonCashSrv = 0;
+  services
+    .filter((s) => s.paymentStatus === "paid" && (s.paidDate || s.date) === targetDate)
+    .forEach((s) => {
+      const tot = (s.items || [])
+        .filter((i) => i.approval === "approved")
+        .reduce((sum, i) => sum + i.price * i.qty, 0);
+      if (s.paymentMethod === "Tunai") cashSrv += tot;
+      else nonCashSrv += tot;
+    });
+
+  let cashPos = 0;
+  let nonCashPos = 0;
+  directSales
+    .filter((d) => d.date === targetDate)
+    .forEach((d) => {
+      if (d.paymentMethod === "Tunai") cashPos += Number(d.total) || 0;
+      else nonCashPos += Number(d.total) || 0;
+    });
+
+  const dayExpense = expenses
+    .filter((e) => e.date === targetDate)
+    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+  currentExpectedCash = cashSrv + cashPos - dayExpense;
+
+  document.getElementById("close-cash-service").textContent = formatRp(cashSrv);
+  document.getElementById("close-cash-pos").textContent = formatRp(cashPos);
+  document.getElementById("close-cash-expense").textContent = "-" + formatRp(dayExpense);
+  document.getElementById("close-expected-cash").textContent = formatRp(currentExpectedCash);
+  document.getElementById("close-noncash-info").textContent =
+    `Non-Tunai (QRIS + Transfer): ${formatRp(nonCashSrv + nonCashPos)}`;
+  updateClosingDiff();
+};
+
+window.updateClosingDiff = function () {
+  const actual = Number(document.getElementById("close-actual-cash").value) || 0;
+  const diff = actual - currentExpectedCash;
+  const box = document.getElementById("close-diff-box");
+
+  if (diff === 0) {
+    box.className = "p-3 rounded-xl bg-emerald-100 text-emerald-800 text-center font-bold text-sm";
+    box.textContent = "Selisih Laci: KLOP (Rp 0)";
+  } else if (diff > 0) {
+    box.className = "p-3 rounded-xl bg-blue-100 text-blue-800 text-center font-bold text-sm";
+    box.textContent = `Selisih Laci: LEBIH +${formatRp(diff)}`;
+  } else {
+    box.className = "p-3 rounded-xl bg-rose-100 text-rose-800 text-center font-bold text-sm";
+    box.textContent = `Selisih Laci: KURANG -${formatRp(Math.abs(diff))}`;
+  }
+};
+
+function renderOwnerClosingsList() {
+  const el = document.getElementById("owner-closings-list");
+  if (!el) return;
+  if (closings.length === 0) {
+    el.innerHTML = `<p class="text-xs text-slate-400 italic">Belum ada riwayat tutup kasir.</p>`;
+    return;
+  }
+  el.innerHTML = closings
+    .slice(0, 10)
+    .map((c) => {
+      const diff = Number(c.diff) || 0;
+      const badgeClass =
+        diff === 0
+          ? "bg-emerald-100 text-emerald-800"
+          : diff > 0
+          ? "bg-blue-100 text-blue-800"
+          : "bg-rose-100 text-rose-800";
+      const diffLabel =
+        diff === 0 ? "KLOP" : diff > 0 ? `+${formatRp(diff)}` : `-${formatRp(Math.abs(diff))}`;
+
+      return `
+      <div class="p-3 rounded-xl border border-slate-200 bg-slate-50 flex justify-between items-start gap-2">
+        <div>
+          <p class="font-bold text-slate-900">${c.date} <span class="ml-1.5 text-[10px] px-2 py-0.5 rounded-full ${badgeClass}">${diffLabel}</span></p>
+          <p class="text-xs text-slate-600 mt-0.5">Sistem: <b>${formatRp(c.expectedCash)}</b> • Fisik: <b>${formatRp(c.actualCash)}</b></p>
+          <p class="text-[11px] text-slate-400">Catatan: ${c.note || "-"}</p>
+        </div>
+        <button onclick="deleteClosingItem('${c.id}')" class="text-slate-400 hover:text-rose-600 text-xs">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>`;
+    })
+    .join("");
+}
+
+window.deleteClosingItem = async function (id) {
+  if (confirm("Hapus catatan tutup kasir ini?")) await dbService.deleteClosing(id);
+};
+
+// ==========================================
+// KASIR BELI PUTUS & RIWAYAT KENDARAAN
 // ==========================================
 window.addPosCartItem = function () {
   const partId = document.getElementById("pos-part-select").value;
@@ -846,8 +1127,9 @@ function renderPosCart() {
       </div>`
     )
     .join("");
-  const total = posCart.reduce((s, i) => s + i.price * i.qty, 0);
-  document.getElementById("pos-cart-total").textContent = formatRp(total);
+  document.getElementById("pos-cart-total").textContent = formatRp(
+    posCart.reduce((s, i) => s + i.price * i.qty, 0)
+  );
 }
 
 function renderPosHistory() {
@@ -881,9 +1163,6 @@ window.deleteDirectSaleItem = async function (id) {
   if (confirm("Hapus riwayat penjualan ini?")) await dbService.deleteDirectSale(id);
 };
 
-// ==========================================
-// RIWAYAT KENDARAAN & REMINDER GANTI OLI
-// ==========================================
 window.openPlateHistoryModal = function (plate) {
   const clean = plate.replace(/\s+/g, "").toUpperCase();
   const logs = services.filter((s) => s.plate.replace(/\s+/g, "").toUpperCase() === clean);
@@ -922,15 +1201,11 @@ function renderHistoryAndReminders() {
   const query = (document.getElementById("history-search-input")?.value || "").trim().toUpperCase();
   const dueOnly = document.getElementById("filter-due-only")?.checked || false;
 
-  // Kelompokkan berdasarkan plat nomor unik (ambil servis terakhir)
   const vehicleMap = {};
   services.forEach((s) => {
     const key = s.plate.replace(/\s+/g, "").toUpperCase();
-    if (!vehicleMap[key]) {
-      vehicleMap[key] = { ...s, visitCount: 1 };
-    } else {
-      vehicleMap[key].visitCount += 1;
-    }
+    if (!vehicleMap[key]) vehicleMap[key] = { ...s, visitCount: 1 };
+    else vehicleMap[key].visitCount += 1;
   });
 
   const nowMs = Date.now();
@@ -994,7 +1269,7 @@ window.sendReminderWA = function (serviceId) {
 };
 
 // ==========================================
-// 3. RENDER DASHBOARD OWNER
+// 3. RENDER DASHBOARD OWNER & EXPORT CSV
 // ==========================================
 window.setOwnerPeriod = function (period, btnEl) {
   ownerPeriod = period;
@@ -1009,7 +1284,7 @@ window.setOwnerPeriod = function (period, btnEl) {
   renderOwnerFinanceAndMetrics();
 };
 
-function renderOwnerFinanceAndMetrics() {
+function getOwnerPeriodCalculations() {
   const paidServices = services.filter(
     (s) => s.paymentStatus === "paid" && isDateInOwnerPeriod(s.paidDate || s.date)
   );
@@ -1058,17 +1333,33 @@ function renderOwnerFinanceAndMetrics() {
   const totalExpense = periodExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const netProfit = totalRevenue - totalCost - totalCommission - totalExpense;
 
-  document.getElementById("owner-revenue").textContent = formatRp(totalRevenue);
-  document.getElementById("owner-payment-split").textContent =
-    `Tunai: ${formatRp(paySplit.Tunai)} | QRIS: ${formatRp(paySplit.QRIS)} | TF: ${formatRp(paySplit.Transfer)}`;
-  document.getElementById("owner-cost").textContent = formatRp(totalCost);
-  document.getElementById("owner-commission").textContent = formatRp(totalCommission);
-  document.getElementById("owner-expense").textContent = formatRp(totalExpense);
-  document.getElementById("owner-profit").textContent = formatRp(netProfit);
+  return {
+    paidServices,
+    periodDirectSales,
+    periodExpenses,
+    totalRevenue,
+    totalCost,
+    totalCommission,
+    totalExpense,
+    netProfit,
+    paySplit,
+    mechReportMap
+  };
+}
 
-  // Render Komisi Mekanik
+function renderOwnerFinanceAndMetrics() {
+  const calc = getOwnerPeriodCalculations();
+
+  document.getElementById("owner-revenue").textContent = formatRp(calc.totalRevenue);
+  document.getElementById("owner-payment-split").textContent =
+    `Tunai: ${formatRp(calc.paySplit.Tunai)} | QRIS: ${formatRp(calc.paySplit.QRIS)} | TF: ${formatRp(calc.paySplit.Transfer)}`;
+  document.getElementById("owner-cost").textContent = formatRp(calc.totalCost);
+  document.getElementById("owner-commission").textContent = formatRp(calc.totalCommission);
+  document.getElementById("owner-expense").textContent = formatRp(calc.totalExpense);
+  document.getElementById("owner-profit").textContent = formatRp(calc.netProfit);
+
   const mechReportEl = document.getElementById("owner-mechanic-report");
-  const entries = Object.entries(mechReportMap);
+  const entries = Object.entries(calc.mechReportMap);
   mechReportEl.innerHTML =
     entries.length === 0
       ? `<p class="text-xs text-slate-400 italic">Belum ada servis lunas pada periode ini.</p>`
@@ -1088,12 +1379,11 @@ function renderOwnerFinanceAndMetrics() {
           )
           .join("");
 
-  // Render Daftar Pengeluaran
   const expEl = document.getElementById("owner-expense-list");
   expEl.innerHTML =
-    periodExpenses.length === 0
+    calc.periodExpenses.length === 0
       ? `<p class="py-3 text-xs text-slate-400 italic">Belum ada catatan pengeluaran pada periode ini.</p>`
-      : periodExpenses
+      : calc.periodExpenses
           .map(
             (e) => `
             <div class="py-2.5 flex justify-between items-center">
@@ -1110,11 +1400,145 @@ function renderOwnerFinanceAndMetrics() {
           .join("");
 }
 
+// ==========================================
+// EXPORT CSV EXCEL
+// ==========================================
+function downloadCSVFile(filename, rows) {
+  const csvContent =
+    "\uFEFF" +
+    rows
+      .map((row) =>
+        row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")
+      )
+      .join("\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+window.exportTransactionsCSV = function () {
+  const calc = getOwnerPeriodCalculations();
+  const rows = [
+    [
+      "Tanggal",
+      "Jenis Transaksi",
+      "Kode / Customer",
+      "Plat & Motor",
+      "Mekanik",
+      "Metode Bayar",
+      "Rincian Item",
+      "Omzet (Rp)",
+      "Modal Part (Rp)",
+      "Komisi Mekanik (Rp)",
+      "Profit Bersih Transaksi (Rp)"
+    ]
+  ];
+
+  calc.paidServices.forEach((srv) => {
+    const rate = srv.mechanicCommissionRate ?? APP_CONFIG.defaultCommissionRate;
+    const approved = (srv.items || []).filter((i) => i.approval === "approved");
+    let rev = 0;
+    let cost = 0;
+    let comm = 0;
+    approved.forEach((i) => {
+      const sub = i.price * i.qty;
+      rev += sub;
+      if (i.type === "part") cost += (i.cost || 0) * i.qty;
+      else comm += sub * rate;
+    });
+    const itemsText = approved.map((i) => `${i.name} (${i.qty}x)`).join("; ");
+    rows.push([
+      srv.paidDate || srv.date,
+      "Servis Motor",
+      `${srv.code} - ${srv.customer}`,
+      `${srv.plate} (${srv.bike})`,
+      srv.mechanic,
+      srv.paymentMethod,
+      itemsText,
+      rev,
+      cost,
+      Math.round(comm),
+      Math.round(rev - cost - comm)
+    ]);
+  });
+
+  calc.periodDirectSales.forEach((sale) => {
+    const itemsText = (sale.items || []).map((i) => `${i.name} (${i.qty}x)`).join("; ");
+    const rev = Number(sale.total) || 0;
+    const cost = Number(sale.totalCost) || 0;
+    rows.push([
+      sale.date,
+      "Beli Putus Part",
+      sale.customer,
+      "-",
+      "-",
+      sale.paymentMethod,
+      itemsText,
+      rev,
+      cost,
+      0,
+      rev - cost
+    ]);
+  });
+
+  if (rows.length === 1) return alert("Tidak ada transaksi lunas pada periode ini untuk diexport.");
+  downloadCSVFile(`Laporan_Transaksi_Bengkel_${ownerPeriod}_${todayStr}.csv`, rows);
+};
+
+window.exportMechanicsCSV = function () {
+  const calc = getOwnerPeriodCalculations();
+  const entries = Object.entries(calc.mechReportMap);
+  if (entries.length === 0) return alert("Belum ada data komisi mekanik pada periode ini.");
+
+  const rows = [
+    ["Nama Mekanik", "Jumlah Motor Selesai", "Total Pendapatan Jasa (Rp)", "Total Hak Komisi (Rp)"]
+  ];
+  entries.forEach(([name, d]) => {
+    rows.push([name, d.count, d.serviceFee, Math.round(d.commission)]);
+  });
+
+  downloadCSVFile(`Rekap_Komisi_Mekanik_${ownerPeriod}_${todayStr}.csv`, rows);
+};
+
+// ==========================================
+// PENGATURAN QRIS & REKENING + MASTER DATA
+// ==========================================
+function renderSettingsPreview() {
+  const bankInput = document.getElementById("set-bank-info");
+  const bankText = document.getElementById("preview-bank-text");
+  const qrisImg = document.getElementById("preview-qris-img");
+  if (!bankInput) return;
+
+  bankInput.value = shopSettings.bankInfo || "";
+  bankText.textContent = shopSettings.bankInfo || "Belum ada rekening diatur";
+
+  if (shopSettings.qrisImage) {
+    qrisImg.src = shopSettings.qrisImage;
+    qrisImg.classList.remove("hidden");
+  } else {
+    qrisImg.classList.add("hidden");
+  }
+}
+
+window.clearQrisImage = async function () {
+  if (!confirm("Hapus gambar QRIS dari halaman customer?")) return;
+  await dbService.saveSettings({
+    bankInfo: document.getElementById("set-bank-info").value.trim(),
+    qrisImage: ""
+  });
+};
+
 window.deleteExpenseItem = async function (id) {
   if (confirm("Hapus catatan pengeluaran ini?")) await dbService.deleteExpense(id);
 };
 
-// Render Master Sparepart & Jasa
 function renderOwnerCatalog() {
   const tbody = document.getElementById("owner-parts-table");
   if (!tbody) return;
@@ -1158,7 +1582,6 @@ window.deleteMasterPart = async function (partId) {
   if (confirm("Hapus item ini?")) await dbService.deletePart(partId);
 };
 
-// Render Kelola Mekanik
 function renderOwnerMechanicsManage() {
   const el = document.getElementById("owner-mechanics-manage-list");
   if (!el) return;

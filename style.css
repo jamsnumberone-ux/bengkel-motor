@@ -11,7 +11,10 @@
   font-weight: 700;
 }
 
-.filter-chip.active {
+.admin-subtab.active,
+.owner-subtab.active,
+.filter-chip.active,
+.owner-period-btn.active {
   background-color: #0f172a;
   color: #ffffff;
 }

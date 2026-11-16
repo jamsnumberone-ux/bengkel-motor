@@ -22,27 +22,27 @@ export const APP_CONFIG = {
 };
 
 // ==========================================
-// 2. KONFIGURASI FIREBASE FIRESTORE
-// Paste config dari Firebase Console lu di bawah ini
-// ==========================================
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "GANTI_DENGAN_API_KEY_KAMU",
-  authDomain: "project-kamu.firebaseapp.com",
-  projectId: "project-kamu",
-  storageBucket: "project-kamu.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef"
+  apiKey: "AIzaSyDot4MgQNCb9aLIP6bHasUaesI1ta81chk",
+  authDomain: "bengkel-motor-a2d8f.firebaseapp.com",
+  projectId: "bengkel-motor-a2d8f",
+  storageBucket: "bengkel-motor-a2d8f.firebasestorage.app",
+  messagingSenderId: "67444699116",
+  appId: "1:67444699116:web:45e390029ddf53caee1ac9",
+  measurementId: "G-PFWTS6GX91"
 };
 
-const isFirebaseConfigured =
-  firebaseConfig.apiKey && firebaseConfig.apiKey !== "GANTI_DENGAN_API_KEY_KAMU";
-
-let db = null;
-if (isFirebaseConfigured) {
-  const app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
-}
-
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 // ==========================================
 // 3. DATA SIMULASI AWAL (JIKA MODE LOCAL DEMO)
 // ==========================================
